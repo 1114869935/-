@@ -57,8 +57,6 @@ def preprocess_text(text):
 def load_my_local_search_dataset(file_path):
     with open(file_path,"r+",encoding="utf-8") as f:
         papers=json.load(f)
-    for paper in papers:
-        paper['abstract']=preprocess_text(paper['abstract'])
     return papers
 
 
@@ -197,7 +195,7 @@ def parse_text(local_text, tag):
                 elif child.name == 'cite':
                     # add hrefs
                     hrefs = [a.get('href').strip('#') for a in child.find_all('a', class_='ltx_ref')]
-                    local_text.append('~\cite{' + ', '.join(hrefs) + '}')
+                    local_text.append('~\\cite{' + ', '.join(hrefs) + '}')
                 elif child.name == 'img' and child.has_attr('alt'):
                     math_txt = child.get('alt')
                     if len(math_txt) < max_math_length:
@@ -275,49 +273,12 @@ def parse_html(html_file):
     return document 
 
 def search_section_by_arxiv_id(entry_id, cite):
-    warnings.warn("Using search_section_by_arxiv_id function may return wrong title because ar5iv parsing citation error. To solve this, You can prompt any LLM to extract the paper title from the reference string")
-    assert re.match(r'^\d+\.\d+$', entry_id)
-    url = f'https://ar5iv.labs.arxiv.org/html/{entry_id}'
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            html_content = response.text
-            if not 'https://ar5iv.labs.arxiv.org/html' in html_content:
-                warnings.warn(f'Invalid ar5iv HTML document: {url}')
-                return None
-            else:
-                try:
-                    document = parse_html(html_content)
-                except:
-                    warnings.warn(f'Wrong format HTML document: {url}')
-                    return None
-                try:
-                    sections = get_2nd_section(document["sections"][0]["subsections"])
-                except:
-                    warnings.warn(f'Get subsections error')
-                    return None
-                sections2title = {}
-                for k, v in sections.items():
-                    k = " ".join(k.split("\n"))
-                    sections2title[k] = set()
-                    bibs = re.findall(cite, v, re.DOTALL)
-                    for bib in bibs:
-                        bib = bib.split(",")
-                        for b in bib:
-                            if b not in document["references"]:
-                                continue
-                            sections2title[k].add(document["references"][b]["title"]) # !!! The title here may be incorrect, you can use an LLM to parse the write title from document["references"][b]["meta_string"] !!!
-                    if len(sections2title[k]) == 0:
-                        del sections2title[k]
-                    else:
-                        sections2title[k] = list(sections2title[k])
-                return sections2title
-        else:
-            warnings.warn(f"Failed to retrieve content. Status code: {response.status_code}")
-            return None
-    except requests.RequestException as e:
-        warnings.warn(f"An error occurred: {e}")
-        return None
+    if not re.match(r'^\d+\.\d+$', entry_id):
+        return []  # 或返回默认值
+    try: 
+        return []
+    except :
+        return []
 
 def keep_letters(s):
     letters = [c for c in s if c.isalpha()]

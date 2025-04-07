@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Bytedance Ltd. and/or its affiliates
+ # Copyright (c) 2024 Bytedance Ltd. and/or its affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,8 +26,22 @@ from utils      import (
     preprocess_text
 )
 from sentence_transformers import SentenceTransformer, util
+local_model_path = 'all-MiniLM-L6-v2/sentence-transformers_all-MiniLM-L6-v2'
+BERT_model=SentenceTransformer(local_model_path)
 
-local_model_path = 'autodl-tmp/pasa/all-MiniLM-L6-v/sentence-transformers_all-MiniLM-L6-v2'
+def numpy_to_python(obj):
+    if isinstance(obj, np.ndarray):
+        return [numpy_to_python(item) for item in obj]
+    elif isinstance(obj, (np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.int32, np.int64)):
+        return int(obj)  # 整数类型转换
+    elif isinstance(obj, dict):
+        return {k: numpy_to_python(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [numpy_to_python(item) for item in obj]
+    else:
+        return obj
 
 class PaperAgent:
     def __init__(
@@ -49,7 +63,8 @@ class PaperAgent:
         self.selector   = selector
         self.end_date   = end_date
         self.local_papers=local_papers
-        self.prompts    = json.load(open(prompts_path))
+        with open(prompts_path, 'r', encoding='UTF-8') as f:
+            self.prompts = json.load(f)
         self.root       = PaperNode({
             "title": user_query,
             "extra": {
@@ -73,12 +88,12 @@ class PaperAgent:
             "search_template": r"Search\](.*?)\[",
             "expand_template": r"Expand\](.*?)\["
         }
-        self.model=SentenceTransformer(local_model_path)
+        self.model=BERT_model
 
     def calculate_similarity(self,query,papers):
         query=preprocess_text(query)
-        query_embedding=self.model.encode(query)
-        paper_embedding=self.model.encode(paper['abstract'] for paper in papers)
+        query_embedding=self.model.encode(query).tolist()
+        paper_embedding=self.model.encode([paper['abstract'] for paper in papers]).tolist()
         similarities=util.cos_sim(query_embedding,paper_embedding)
         similarities=similarities.numpy().flatten()
         return [(papers[i],similarities[i])for i in range(len(papers))]
@@ -98,7 +113,6 @@ class PaperAgent:
         while queries:
             with self.lock:
                 query, self.root.child[query] = queries.pop(), []
-
             if self.local_papers :
                 similar_papers=self.calculate_similarity(query,self.local_papers)
                 similar_papers.sort(key=lambda x:x[1],reverse=True)
@@ -118,7 +132,7 @@ class PaperAgent:
             else:
                 pre_arxiv_ids, searched_papers = google_search_arxiv_id(query, self.search_papers, self.end_date), []
                 for arxiv_id in pre_arxiv_ids:
-                    arxiv_id = arxiv_id.split('v')[0]
+                    arxiv_id = re.search(r'arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d+)', paper["link"])
                     self.lock.acquire()
                     if arxiv_id not in self.root.extra["touch_ids"]:
                         self.root.extra["touch_ids"].append(arxiv_id)
@@ -162,19 +176,22 @@ class PaperAgent:
                     paper = new_expand.pop(0)
                 else:
                     break
-            
-            if paper.sections == "":
+            if not isinstance(paper.sections, dict):
                 paper.sections = search_section_by_arxiv_id(paper.arxiv_id, self.templates["cite_template"])
-                if not paper.sections:
-                    paper.extra["expand"] = "get full paper error"
+                if not isinstance(paper.sections, dict):
+                    paper.extra["expand"] = ""
                     continue
-            
             paper.extra["expand"] = "not expand"
-            prompt = self.prompts["select_section"].format(user_query=self.user_query, title=paper.title, abstract=paper.abstract, sections=paper.sections.keys()).strip()
+            prompt = self.prompts["select_section"].format(
+                user_query=self.user_query,
+                title=paper.title,
+                abstract=paper.abstract,
+                sections=list(paper.sections.keys())  # 确保 sections 是一个列表
+            ).strip()
             with self.lock:
                 have_full_paper.append(paper)
                 crawl_prompts.append(prompt)
-
+            
     def search_ref(self, section_sources_ori, select_prompts, section_sources, lock):
         while section_sources_ori:
             with lock:

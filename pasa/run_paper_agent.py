@@ -24,9 +24,12 @@ import json
 import argparse
 from models      import Agent
 from datetime    import datetime, timedelta
-
+import numpy as np
 from paper_agent import PaperAgent
 from utils import load_my_local_search_dataset
+import threading
+
+file_write_lock = threading.Lock()
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--input_file',     type=str, default="data/RealScholarQuery/test.jsonl")
@@ -45,6 +48,19 @@ crawler = Agent(args.crawler_path)
 selector = Agent(args.selector_path)
 local_papers=load_my_local_search_dataset(args.local_paper_db)
 
+def numpy_to_python(obj):
+    if isinstance(obj, np.ndarray):
+        return [numpy_to_python(item) for item in obj]
+    elif isinstance(obj, (np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, dict):
+        return {k: numpy_to_python(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [numpy_to_python(item) for item in obj]
+    else:
+        return obj
 
 with open(args.input_file) as f:
     for idx, line in enumerate(f.readlines()):
@@ -70,4 +86,9 @@ with open(args.input_file) as f:
         paper_agent.run()
         
         if args.output_folder != "":
-            json.dump(paper_agent.root.todic(), open(os.path.join(args.output_folder, f"{idx}.json"), "w"), indent=2)
+            data_to_save = paper_agent.root.todic()
+            clean_data = numpy_to_python(data_to_save)
+            file_path = os.path.join(args.output_folder, f"{idx}.json")
+            with file_write_lock:
+                with open(file_path, 'w') as f_out:
+                    json.dump(clean_data, f_out, indent=2)
